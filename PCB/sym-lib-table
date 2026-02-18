@@ -6,4 +6,5 @@
   (lib (name "282837-3")(type "KiCad")(uri "3_pin_terminal_block/282837-3.kicad_sym")(options "")(descr ""))
   (lib (name "1825910-6")(type "KiCad")(uri "1825910-6/1825910-6.kicad_sym")(options "")(descr ""))
   (lib (name "NMEA2000")(type "KiCad")(uri "NMEA_Connector/54-00387.kicad_sym")(options "")(descr ""))
+  (lib (name "MicroSD_Breakout")(type "KiCad")(uri "MicroSD_Breakout.pretty/MicroSD_Breakout.kicad_sym")(options "")(descr "6-pin header for MicroSD SPI breakout"))
 )

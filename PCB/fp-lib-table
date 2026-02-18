@@ -6,4 +6,5 @@
   (lib (name "RV09AF-40-20K-A10K")(type "KiCad")(uri "RV09AF-40-20K-A10K")(options "")(descr ""))
   (lib (name "OLED_128X64_1.3_I2C")(type "KiCad")(uri "OLED_128X64_1.3_I2C")(options "")(descr ""))
   (lib (name "Teensy")(type "KiCad")(uri "Teensy")(options "")(descr ""))
+  (lib (name "MicroSD_Breakout")(type "KiCad")(uri "MicroSD_Breakout.pretty")(options "")(descr "6-pin header for MicroSD SPI breakout"))
 )

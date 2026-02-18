@@ -74,9 +74,28 @@ All PCB design files are in `PCB/` (KiCad 9.0 format):
 - Requires a KiCad footprint (many available in standard library)
 
 **Option B — Breakout module (easiest for prototyping):**
-- Adafruit #254 or generic "Micro SD SPI breakout"
 - 6-pin header: VCC, GND, MISO, MOSI, SCK, CS
 - Can mount via pin headers on the PCB
+
+#### Amazon Breakout Options (verified Feb 2026)
+
+| Module | Link | Qty | Level Shift | Notes |
+|--------|------|-----|-------------|-------|
+| Adafruit #254 | [Amazon](https://www.amazon.com/Adafruit-MicroSD-Breakout-Board-ADA254/dp/B00NAY2NAI) | 1 | Yes (5V/3.3V) | Best quality, well documented, activity LED |
+| Treedix Level Shifting | [Amazon](https://www.amazon.com/Treedix-Shifting-Breakout-Interface-Conversion/dp/B0B2HS1J63) | 2 | Yes (5V/3.3V) | Good Adafruit alternative |
+| Stemedu 5PCS | [Amazon](https://www.amazon.com/Interface-Arduino-Raspberry-Breakout-Cable%EF%BC%88Pack/dp/B07MTTLF75) | 5 | Yes (5V/3.3V) | Best value, includes jumper cables |
+| Geekstory 5PCS | [Amazon](https://www.amazon.com/Geekstory-Module-Adapter-Interface-Arduino/dp/B07X478BPL) | 5 | Yes (5V/3.3V) | Includes dupont cables, mounting holes |
+| AIHJCNELE 3pcs | [Amazon](https://www.amazon.com/Partstower-Interface-Storage-Breakout-Arduino/dp/B08XPFYBYT) | 3 | Yes (5V/3.3V) | Budget option |
+
+**Recommended:** Stemedu 5PCS or Treedix 2pcs — both have onboard 3.3V regulator and level shifting, work with 5V or 3.3V logic, and are compatible with Arduino SD libraries.
+
+All modules use standard SPI pinout matching the J3 connector on the PCB:
+- Pin 1: VCC (3.3V or 5V input)
+- Pin 2: GND
+- Pin 3: SCK (clock)
+- Pin 4: MOSI (data in)
+- Pin 5: MISO (data out)
+- Pin 6: CS (chip select)
 
 ## Firmware Changes
 
