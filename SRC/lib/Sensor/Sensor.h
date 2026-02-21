@@ -64,6 +64,7 @@ private:
     unsigned long lastUpdate;       ///< Timestamp of last sensor update
     int rawValue;                   ///< Raw analog reading (0-1023)
     bool active;                    ///< True if sensor is actively transmitting
+    bool serialControlled;          ///< True if value set via serial (bypass analog read)
     tNMEA2000_Teensyx* NMEA2000;   ///< Pointer to NMEA2000 CAN interface
     int deviceIndex;                ///< Device index for multi-device mode
     uint16_t manufacturerCode;      ///< NMEA2000 manufacturer code for NAME
@@ -256,6 +257,26 @@ public:
      *  \return Pointer to custom name string
      */
     const char* getCustomName();
+
+    /** \brief Set normalized value directly (bypasses analog read)
+     *  \param normalizedValue Value in 0.0-1.0 range, mapped to 0-1023 raw
+     */
+    void setValue(float normalizedValue);
+
+    /** \brief Enable/disable serial control mode
+     *  \param enabled When true, update() skips analog read
+     */
+    void setSerialControlled(bool enabled);
+
+    /** \brief Check if sensor is in serial control mode
+     *  \return True if serial controlled
+     */
+    bool isSerialControlled();
+
+    /** \brief Get the NMEA2000 source address for this sensor
+     *  \return Current source address from the CAN interface
+     */
+    uint8_t getSourceAddress();
 };
 
 #endif // SENSOR_H

@@ -54,6 +54,7 @@ Sensor::Sensor(uint8_t analogPin, MessageType type, tNMEA2000_Teensyx* CAN_Inter
     lastUpdate = 0;
     rawValue = 0;
     active = false;  // Default to inactive - must be explicitly enabled
+    serialControlled = false;  // Default to potentiometer control
     NMEA2000 = CAN_Interface;
     deviceIndex = devIndex;
     manufacturerCode = 2046;  // Default manufacturer code (reserved range)
@@ -96,7 +97,10 @@ MessageType Sensor::getMessageType() {
  * before sendMessage().
  */
 void Sensor::update() {
-    rawValue = readAnalog();
+    if (!serialControlled) {
+        rawValue = readAnalog();
+    }
+    // When serialControlled, rawValue is set via setValue()
 }
 
 //*****************************************************************************
@@ -737,4 +741,27 @@ void Sensor::setCustomName(const char* name) {
  */
 const char* Sensor::getCustomName() {
     return customName;
+}
+
+//*****************************************************************************
+void Sensor::setValue(float normalizedValue) {
+    // Clamp to 0.0-1.0 range, map to 0-1023 raw ADC range
+    if (normalizedValue < 0.0f) normalizedValue = 0.0f;
+    if (normalizedValue > 1.0f) normalizedValue = 1.0f;
+    rawValue = (int)(normalizedValue * 1023.0f);
+}
+
+//*****************************************************************************
+void Sensor::setSerialControlled(bool enabled) {
+    serialControlled = enabled;
+}
+
+//*****************************************************************************
+bool Sensor::isSerialControlled() {
+    return serialControlled;
+}
+
+//*****************************************************************************
+uint8_t Sensor::getSourceAddress() {
+    return NMEA2000->GetN2kSource(deviceIndex);
 }

@@ -25,6 +25,7 @@
 #include <Menu_Controller.h>
 #include <Splash_Screen.h>
 #include <Sensor.h>
+#include <Serial_Controller.h>
 
 
 
@@ -85,6 +86,9 @@ Attack_Controller* attackController;
 
 //Menu system controller instance.
 Menu_Controller* menuController;
+
+//Serial command controller for GUI communication.
+Serial_Controller* serialController;
 
 
 /**
@@ -196,6 +200,12 @@ void setup(void)
                                       n2kMonitor, attackController);
   menuController->begin();
 
+  // Initialize Serial Controller for GUI communication
+  serialController = new Serial_Controller(&sensor1, &sensor2, &sensor3,
+                                           attackController, n2kMonitor,
+                                           &NMEA2000_CAN1);
+  serialController->begin();
+
 #if DEBUG
   Serial.println("System initialized");
 #endif
@@ -229,6 +239,9 @@ void setup(void)
 
 void loop(void)
 {
+  // Process serial commands from GUI
+  serialController->update();
+
   unsigned long currentTime = millis();
 
   // Update sensors at regular intervals
@@ -327,9 +340,18 @@ void setupNMEA2000() {
 
 void HandleNMEA2000Msg(const tN2kMsg &N2kMsg) {
 #if !DEBUG
-  // Print candump-style output for all received messages
-  PrintCandumpFormat(N2kMsg);
+  // Print candump-style output only when GUI streaming is not active
+  if (serialController == nullptr || !serialController->isStreamEnabled()) {
+    PrintCandumpFormat(N2kMsg);
+  }
 #endif
+
+  // Forward to Serial_Controller for GUI streaming (JSON format)
+  if (serialController != nullptr && serialController->isStreamEnabled()) {
+    uint32_t canId = ((uint32_t)N2kMsg.Priority << 26) |
+                     ((uint32_t)N2kMsg.PGN << 8) | N2kMsg.Source;
+    serialController->streamCanFrame(canId, N2kMsg.DataLen, N2kMsg.Data);
+  }
 
   if(attackController != nullptr && attackController -> isSpamActive()) {
     attackController->attackHandler(N2kMsg);
