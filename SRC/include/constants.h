@@ -33,6 +33,40 @@
 #define DEBUG false
 
 /*
+ * Capture Output Configuration
+ */
+
+/** \brief Capture mode value: raw CAN frames as received (default, ground truth). */
+#define NEMO_CAPTURE_RAW 0
+
+/**
+ * \brief Capture mode value: legacy output re-fragmented from ASSEMBLED NMEA2000
+ *        messages. NOT raw frames: original fast-packet sequence IDs, interleaving,
+ *        duplicates and lost frames are not represented. Lines use interface name
+ *        "n2kreasm" and the banner/sync lines say mode=RECONSTRUCTED.
+ */
+#define NEMO_CAPTURE_RECONSTRUCTED 1
+
+/**
+ * \def NEMO_CAPTURE_MODE
+ * \brief Selects the serial capture output (when DEBUG is false and GUI streaming is off).
+ *
+ * Default NEMO_CAPTURE_RAW: every frame received on CAN2, tapped at the CAN
+ * interrupt before fast-packet assembly, printed in `candump -t a` format with
+ * a boot-relative microsecond timestamp. Override with
+ * build_flags = -DNEMO_CAPTURE_MODE=NEMO_CAPTURE_RECONSTRUCTED to get the legacy output.
+ */
+#ifndef NEMO_CAPTURE_MODE
+#define NEMO_CAPTURE_MODE NEMO_CAPTURE_RAW
+#endif
+
+/** \brief Interval in milliseconds between "# NEMO-SYNC" lines. */
+#define NEMO_CAPTURE_SYNC_INTERVAL_MS 1000
+
+/** \brief Capture FIFO entries between the CAN ISR and loop() (24 bytes each). */
+#define NEMO_CAPTURE_FIFO_SIZE 2048
+
+/*
  * Hardware Pin Definitions - Sensor Inputs
 */
 
