@@ -276,7 +276,19 @@ void loop(void)
       sensor3.sendMessage();
 
     } else {
-      // External attack (not impersonating own sensor) - only update sensor1 for potentiometer control
+      // External attack (spam DoS, or impersonating another device) - the
+      // board's own periodic sensor transmit is SUSPENDED for the duration of
+      // the attack. This is a deliberate design choice (DEFECT D25):
+      //   * The spam flood is a positive-control DoS that is meant to own the
+      //     bus; interleaving benign sensor PGNs from the injector's own
+      //     source addresses (0x19-0x1B) would pollute the "LOUD" ground-truth
+      //     window the campaign runner logs.
+      //   * During an address-claim flood the sensor devices have lost
+      //     arbitration anyway, so emitting their data PGNs is inconsistent.
+      // We still update sensor1 so its potentiometer value tracks for the
+      // impersonate field-control path. Normal sensor transmit resumes
+      // automatically on the next UPDATE_INTERVAL tick once the attack stops
+      // (isAttackActive() returns false and the !attackActive branch runs).
       sensor1.update();
     }
   }

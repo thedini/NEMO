@@ -189,7 +189,13 @@ void Serial_Controller::handleAttackCommand(JsonDocument& doc) {
 
     if (strcmp(type, "spam") == 0) {
         if (action && strcmp(action, "start") == 0) {
-            attackController->startSpamAttack();
+            // Optional "rate" (frames/second); omitted -> firmware default.
+            // Out-of-range values are clamped inside startSpamAttack().
+            if (doc["rate"].is<int>()) {
+                attackController->startSpamAttack((uint32_t)doc["rate"]);
+            } else {
+                attackController->startSpamAttack();
+            }
             sendEvent("{\"evt\":\"ack\",\"cmd\":\"attack\",\"ok\":true}");
         } else {
             sendEvent("{\"evt\":\"error\",\"msg\":\"spam requires action:start\"}");

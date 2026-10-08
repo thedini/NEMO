@@ -33,6 +33,24 @@ enum AttackType {
 // Forward declaration
 class Sensor;
 
+// --- Spam (ISO Address-Claim flood / DoS) tuning (DEFECT D25 fix) ---
+// The flood transmits proactively from update() at a bounded, configurable
+// rate. These constants bound that rate and the address range so the flood
+// can never (a) saturate the main loop or (b) emit a source address the
+// NMEA2000 library would reject (CAN bus address range is 0-251).
+#ifndef SPAM_DEFAULT_RATE_FPS
+#define SPAM_DEFAULT_RATE_FPS 100u    // default flood rate, frames/second
+#endif
+#ifndef SPAM_MAX_RATE_FPS
+#define SPAM_MAX_RATE_FPS 1000u       // hard cap on the configurable rate
+#endif
+#ifndef SPAM_MAX_FRAMES_PER_UPDATE
+#define SPAM_MAX_FRAMES_PER_UPDATE 32u // burst cap per update() call (loop safety)
+#endif
+#ifndef SPAM_MAX_ADDRESS
+#define SPAM_MAX_ADDRESS 251u         // highest legal CAN source address (N2kMaxCanBusAddress)
+#endif
+
 /**
  * \class Attack_Controller
  * \brief Controller for simulating NMEA2000 network attacks.
@@ -56,8 +74,20 @@ private:
     // Spam Attack State
     bool spamAttackActive;             // Flag indicating if spam attack is currently running
     unsigned long spamMessageCount;    // Counter for total spam messages sent
-    unsigned long lastSpamTime;        // Timestamp of last spam message transmission
-    uint8_t currentSpamAddress;        // Current address being claimed (0-254)
+    unsigned long lastSpamTime;        // Pacing anchor (millis) for the proactive flood
+    uint8_t currentSpamAddress;        // Current address being claimed (0-251, wraps)
+    uint32_t spamRateFps;              // Configured flood rate in frames/second (<= SPAM_MAX_RATE_FPS)
+    unsigned long spamStartMs;         // millis() when the current flood started (for ground-truth JSON)
+
+    /**
+     * \brief Proactively transmits the address-claim flood at the configured rate.
+     *
+     * Called from update() every main-loop iteration while the spam attack is
+     * active. Uses millis()-based pacing to emit SPAM rate frames/second,
+     * cycling source addresses 0..SPAM_MAX_ADDRESS, bounded by
+     * SPAM_MAX_FRAMES_PER_UPDATE per call so the loop stays responsive.
+     */
+    void updateSpam();
 
     // ISO Address Takeover tracking
     std::vector<uint8_t> claimedAddresses;  // List of addresses successfully claimed
@@ -151,7 +181,7 @@ public:
      * ISO Address Claims. The attack cycles through addresses 0-254,
      * attempting to claim each one with a high-priority NAME.
      */
-    void startSpamAttack();
+    void startSpamAttack(uint32_t rateFps = SPAM_DEFAULT_RATE_FPS);
 
     /**
      * \brief Stops the spam attack.
