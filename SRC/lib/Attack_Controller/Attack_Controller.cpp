@@ -30,6 +30,8 @@ Attack_Controller::Attack_Controller(tNMEA2000_Teensyx* can1, N2K_Monitor* mon, 
     spamMessageCount = 0;
     lastSpamTime = 0;
     currentSpamAddress = 0;
+    spamRateFps = SPAM_DEFAULT_RATE_FPS;
+    spamStartMs = 0;
 
     // Impersonate attack state
     impersonateActive = false;
@@ -61,6 +63,9 @@ Attack_Controller::Attack_Controller(tNMEA2000_Teensyx* can1, N2K_Monitor* mon, 
 void Attack_Controller::update() {
     if (impersonateActive) {
         updateImpersonate();
+    }
+    if (spamAttackActive) {
+        updateSpam();
     }
 }
 
