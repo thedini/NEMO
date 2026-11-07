@@ -26,14 +26,23 @@
 #include <Splash_Screen.h>
 #include <Sensor.h>
 #include <Serial_Controller.h>
+#include <RawCapture.h>
+#include <NMEA2000_TeensyxRawTap.h>
 
 
 
 //Primary CAN interface for transmitting simulated sensor data
 tNMEA2000_Teensyx NMEA2000_CAN1(tNMEA2000_Teensyx::CAN1);
 
+// Capture FIFO between the CAN2 interrupt and loop() (see NMEA2000_TeensyxRawTap.h).
+// 48 KB in RAM2 (DMAMEM) so RAM1 stays available for stack/variables; only the
+// CPU touches it, and it needs no zero-initialisation.
+DMAMEM static nemo_cap::RawFrame captureFifo[NEMO_CAPTURE_FIFO_SIZE];
+
 // Secondary CAN interface for listening to NMEA2000 traffic.
-tNMEA2000_Teensyx NMEA2000_CAN2(tNMEA2000_Teensyx::CAN2);
+// Same driver as before plus a raw-frame tap at the CAN interrupt, so the
+// capture output sees every frame before fast-packet assembly.
+tNMEA2000_TeensyxRawTap NMEA2000_CAN2(tNMEA2000_Teensyx::CAN2, captureFifo, NEMO_CAPTURE_FIFO_SIZE);
 
 
 
@@ -49,8 +58,24 @@ tNMEA2000_Teensyx NMEA2000_CAN2(tNMEA2000_Teensyx::CAN2);
 //Number of simulated devices on the NMEA2000 bus.
 #define NUM_DEVICES 3
 
-//Sequence counter for fast-packet frame fragmentation.
-static uint8_t fastPacketSequence = 0;
+#if NEMO_CAPTURE_MODE == NEMO_CAPTURE_RECONSTRUCTED
+//Sequence counter used only by the legacy RECONSTRUCTED capture output.
+static uint8_t reconstructSequence = 0;
+#endif
+
+//Timestamp (millis) of the last "# NEMO-SYNC" line.
+static unsigned long lastCaptureSyncTime = 0;
+
+//Capture lines the USB serial port did not take in full. Teensy's
+//usb_serial_write() gives up after 120 ms when the host stops reading
+//(TX_TIMEOUT_MSEC) and then drops output; this makes that loss visible.
+static uint32_t captureTxLost = 0;
+
+//Write one capture line to Serial, counting incomplete writes.
+static void CaptureWrite(const char *line, size_t n) {
+  if (n == 0) return;
+  if (Serial.write((const uint8_t *)line, n) != n) captureTxLost++;
+}
 
 
 //Timestamps of last button press for each button.
@@ -105,18 +130,36 @@ void setupNMEA2000();
 
 
 /**
- * \brief Prints a single CAN frame in candump format to Serial.
- * \param canId The 29-bit extended CAN identifier.
- * \param len The number of data bytes in the frame (0-8).
- * \param data Pointer to the array of data bytes.
+ * \brief True when capture lines may be written to Serial
+ *        (not in DEBUG builds, not while the GUI JSON stream owns the port).
  */
-void PrintCanFrame(uint32_t canId, uint8_t len, const uint8_t *data);
+bool CaptureOutputEnabled();
 
 /**
- * \brief Prints an NMEA2000 message in candump format, handling fast-packet fragmentation.
+ * \brief Raw-frame tap: prints one received CAN2 frame in `candump -t a` format.
+ *
+ * Called by NMEA2000_CAN2 for every frame, in arrival order, with the
+ * timestamp taken in the CAN interrupt, before the NMEA2000 library assembles it.
+ * \param frame The received frame (frame.dropped_before = frames lost just before it).
+ */
+void OnRawCanFrame(const nemo_cap::RawFrame &frame);
+
+/**
+ * \brief Writes the capture banner and periodic "# NEMO-SYNC" lines.
+ * \param force Write a sync line now regardless of the interval.
+ */
+void CaptureSyncTick(bool force);
+
+#if NEMO_CAPTURE_MODE == NEMO_CAPTURE_RECONSTRUCTED
+/**
+ * \brief LEGACY: prints an ASSEMBLED NMEA2000 message re-fragmented into frames.
+ *
+ * Output is labelled interface "n2kreasm" and is NOT raw ground truth; see
+ * nemo_cap::reconstructFrames(). Only built with NEMO_CAPTURE_MODE=NEMO_CAPTURE_RECONSTRUCTED.
  * \param N2kMsg Reference to the NMEA2000 message to print.
  */
-void PrintCandumpFormat(const tN2kMsg &N2kMsg);
+void PrintReconstructedFormat(const tN2kMsg &N2kMsg);
+#endif
 
 /**
  * \brief Maps a button pin to its debounce array index.
@@ -173,6 +216,9 @@ void setup(void)
 
   setupNMEA2000();
   NMEA2000_CAN2.SetMsgHandler(HandleNMEA2000Msg);
+#if NEMO_CAPTURE_MODE == NEMO_CAPTURE_RAW
+  NMEA2000_CAN2.SetRawFrameTap(OnRawCanFrame);
+#endif
   NMEA2000_CAN2.SetMode(tNMEA2000::N2km_ListenOnly);
   NMEA2000_CAN2.SetN2kCANReceiveFrameBufSize(2048);
 
@@ -209,6 +255,9 @@ void setup(void)
 #if DEBUG
   Serial.println("System initialized");
 #endif
+
+  // Capture banner + first sync line (repeated every NEMO_CAPTURE_SYNC_INTERVAL_MS).
+  CaptureSyncTick(true);
 }
 
 /**
@@ -288,6 +337,9 @@ void loop(void)
   }
   NMEA2000_CAN2.ParseMessages();
 
+  // Periodic capture sync line; also keeps the 64-bit capture clock extended.
+  CaptureSyncTick(false);
+
   // Update menu controller (for real-time displays)
   menuController->update();
 
@@ -339,10 +391,11 @@ void setupNMEA2000() {
 }
 
 void HandleNMEA2000Msg(const tN2kMsg &N2kMsg) {
-#if !DEBUG
-  // Print candump-style output only when GUI streaming is not active
-  if (serialController == nullptr || !serialController->isStreamEnabled()) {
-    PrintCandumpFormat(N2kMsg);
+  // Raw capture output is produced per frame by OnRawCanFrame(), before the
+  // library assembled this message. Only the legacy mode prints from here.
+#if NEMO_CAPTURE_MODE == NEMO_CAPTURE_RECONSTRUCTED
+  if (CaptureOutputEnabled()) {
+    PrintReconstructedFormat(N2kMsg);
   }
 #endif
 
@@ -380,76 +433,77 @@ int getButtonIndex(int button) {
   return 0;
 }
 
-void PrintCandumpFormat(const tN2kMsg &N2kMsg) {
-  // Reconstruct CAN ID: Priority (3 bits) | PGN (18 bits) | Source (8 bits)
-  uint32_t canId = ((uint32_t)N2kMsg.Priority << 26) | ((uint32_t)N2kMsg.PGN << 8) | N2kMsg.Source;
-
-  if (N2kMsg.DataLen <= 8) {
-    // Single frame message - print directly
-    PrintCanFrame(canId, N2kMsg.DataLen, N2kMsg.Data);
-  } else {
-    // Fast-packet message - re-fragment into 8-byte CAN frames
-    uint8_t frame[8];
-    int dataOffset = 0;
-    int frameCount = 0;
-    uint8_t seqId = (fastPacketSequence & 0x07) << 5;  // Sequence ID in upper 3 bits of counter byte
-
-    while (dataOffset < N2kMsg.DataLen) {
-      if (frameCount == 0) {
-        // First frame: [SeqID + FrameNum] [TotalLen] [6 data bytes]
-        frame[0] = seqId | (frameCount & 0x1F);
-        frame[1] = N2kMsg.DataLen;
-        int bytesToCopy = min(6, (int)N2kMsg.DataLen - dataOffset);
-        for (int i = 0; i < bytesToCopy; i++) {
-          frame[2 + i] = N2kMsg.Data[dataOffset + i];
-        }
-        // Pad remaining bytes with 0xFF
-        for (int i = bytesToCopy; i < 6; i++) {
-          frame[2 + i] = 0xFF;
-        }
-        dataOffset += bytesToCopy;
-        PrintCanFrame(canId, 8, frame);
-      } else {
-        // Subsequent frames: [SeqID + FrameNum] [7 data bytes]
-        frame[0] = seqId | (frameCount & 0x1F);
-        int bytesToCopy = min(7, (int)N2kMsg.DataLen - dataOffset);
-        for (int i = 0; i < bytesToCopy; i++) {
-          frame[1 + i] = N2kMsg.Data[dataOffset + i];
-        }
-        // Pad remaining bytes with 0xFF
-        for (int i = bytesToCopy; i < 7; i++) {
-          frame[1 + i] = 0xFF;
-        }
-        dataOffset += bytesToCopy;
-        PrintCanFrame(canId, 8, frame);
-      }
-      frameCount++;
-    }
-
-    fastPacketSequence++;
-  }
+bool CaptureOutputEnabled() {
+#if DEBUG
+  return false;
+#else
+  return serialController == nullptr || !serialController->isStreamEnabled();
+#endif
 }
 
-
-void PrintCanFrame(uint32_t canId, uint8_t len, const uint8_t *data) {
-  Serial.print("can1  ");
-  if (canId < 0x10000000) Serial.print("0");
-  if (canId < 0x1000000) Serial.print("0");
-  if (canId < 0x100000) Serial.print("0");
-  if (canId < 0x10000) Serial.print("0");
-  if (canId < 0x1000) Serial.print("0");
-  if (canId < 0x100) Serial.print("0");
-  if (canId < 0x10) Serial.print("0");
-  Serial.print(canId, HEX);
-
-  Serial.print("   [");
-  Serial.print(len);
-  Serial.print("]  ");
-
-  for (int i = 0; i < len; i++) {
-    if (data[i] < 0x10) Serial.print("0");
-    Serial.print(data[i], HEX);
-    if (i < len - 1) Serial.print(" ");
+void OnRawCanFrame(const nemo_cap::RawFrame &frame) {
+  if (!CaptureOutputEnabled()) return;
+  char line[96];
+  size_t n;
+  if (frame.dropped_before != 0) {
+    nemo_cap::CaptureStats st;
+    uint32_t wraps;
+    NMEA2000_CAN2.GetCaptureStats(st, wraps);
+    n = nemo_cap::formatGapLine(line, sizeof(line), frame.ts_us, frame.dropped_before, st.sw_drop);
+    CaptureWrite(line, n);
   }
-  Serial.println();
+  n = nemo_cap::formatCandumpLine(line, sizeof(line), frame.ts_us, nemo_cap::kRawIfName,
+                                  frame.id, frame.len, frame.data, frame.flags);
+  CaptureWrite(line, n);
 }
+
+void CaptureSyncTick(bool force) {
+  unsigned long nowMs = millis();
+  if (!force && nowMs - lastCaptureSyncTime < NEMO_CAPTURE_SYNC_INTERVAL_MS) return;
+  lastCaptureSyncTime = nowMs;
+
+  // Always advance the 64-bit clock, even when output is off, so a quiet bus
+  // can never let micros() wrap unseen.
+  uint64_t nowUs = NMEA2000_CAN2.CaptureNowUs();
+  if (!CaptureOutputEnabled()) return;
+
+#if NEMO_CAPTURE_MODE == NEMO_CAPTURE_RECONSTRUCTED
+  const nemo_cap::CaptureMode mode = nemo_cap::MODE_RECONSTRUCTED;
+  const char *ifname = nemo_cap::kReconstructedIfName;
+#else
+  const nemo_cap::CaptureMode mode = nemo_cap::MODE_RAW;
+  const char *ifname = nemo_cap::kRawIfName;
+#endif
+  char line[200];
+  size_t n;
+  if (force) {
+    n = nemo_cap::formatBannerLine(line, sizeof(line), mode, ifname);
+    CaptureWrite(line, n);
+  }
+  nemo_cap::CaptureStats st;
+  uint32_t wraps;
+  NMEA2000_CAN2.GetCaptureStats(st, wraps);
+  st.tx_lost = captureTxLost;
+  n = nemo_cap::formatSyncLine(line, sizeof(line), nowUs, mode, ifname, st, wraps);
+  CaptureWrite(line, n);
+}
+
+#if NEMO_CAPTURE_MODE == NEMO_CAPTURE_RECONSTRUCTED
+static uint64_t reconstructTimestamp = 0;
+
+static void PrintReconstructedFrame(void *, uint32_t canId, uint8_t len, const uint8_t *data) {
+  char line[96];
+  size_t n = nemo_cap::formatCandumpLine(line, sizeof(line), reconstructTimestamp,
+                                         nemo_cap::kReconstructedIfName, canId, len, data,
+                                         nemo_cap::RF_EXTENDED);
+  CaptureWrite(line, n);
+}
+
+void PrintReconstructedFormat(const tN2kMsg &N2kMsg) {
+  // Timestamp = time the assembled message reached the handler, not frame arrival.
+  reconstructTimestamp = NMEA2000_CAN2.CaptureNowUs();
+  nemo_cap::reconstructFrames(N2kMsg.Priority, N2kMsg.PGN, N2kMsg.Source, N2kMsg.Destination,
+                              N2kMsg.Data, N2kMsg.DataLen, reconstructSequence,
+                              PrintReconstructedFrame, nullptr);
+}
+#endif

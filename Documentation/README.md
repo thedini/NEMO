@@ -87,7 +87,7 @@ Three 10K pots provide analog input for:
 
 **Data Dump**:
 
-- All data that is received by the device is dumped out over the Serial Console in the standard CANDUMP format.
+- Every CAN frame received by the device is dumped out over the Serial Console, exactly as received, in the standard CANDUMP (`candump -t a`) format with a microsecond timestamp.
 - This can then be processed by `candump2analyzer` and `analyzer` procided by the CANBOAT organization. [CANBOAT](https://github.com/canboat/canboat)
 
 

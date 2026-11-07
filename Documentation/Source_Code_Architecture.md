@@ -99,14 +99,25 @@ When `setup()` runs:
 
 ### Debug Output
 
-Everything received on CAN2 gets dumped in `candump` format:
+Every CAN frame received on CAN2 is printed exactly as it was received, in `candump -t a` format:
 
 ```
-can1  09F80106   [8]  00 00 23 FF FF FF FF FF
-can1  09F11001   [8]  01 18 27 4A 00 FF 64 00
+# NEMO-CAPTURE v=1 mode=raw fmt=candump-ta iface=can2 clock=micros64 origin=boot
+ (0000000003.512877)  can2  09F80106   [8]  00 00 23 FF FF FF FF FF
+ (0000000003.513491)  can2  18EAB801   [3]  00 EE 00
+# NEMO-SYNC v=1 mode=raw iface=can2 t=0000000004.000010 rx=812 drop=0 ovr=0 batch=0 late=0 hwm=3/2047 txlost=0 wraps=0
 ```
 
-Hook up a terminal at 115200 baud and you can pipe this to analysis tools. Fast-packet messages get reassembled so you see the original frames.
+The frames are tapped at the CAN interrupt, before the NMEA2000 library assembles fast packets.
+That means you get the original fast-packet frames (with their real sequence IDs), PDU1
+destinations, duplicates and incomplete messages, in arrival order. The timestamp is
+microseconds since boot, taken in the interrupt. `#` lines are metadata (startup banner, a sync
+line every second with capture counters, and `NEMO-GAP` where frames were dropped); candump
+parsers ignore them. See `SRC/lib/Raw_Capture/` and `tools/validate_raw_capture.md`.
+
+The old output (assembled messages re-split by NEMO, without timestamps) can still be built with
+`-DNEMO_CAPTURE_MODE=NEMO_CAPTURE_RECONSTRUCTED`. Its lines use interface name `n2kreasm`, and
+it is not raw bus data.
 
 
 
